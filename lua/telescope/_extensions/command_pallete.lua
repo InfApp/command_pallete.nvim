@@ -5,21 +5,6 @@ local drop_down_theme = require("telescope.themes").get_dropdown{}
 local actions = require "telescope.actions"
 local action_state = require "telescope.actions.state"
 local state = require "telescope.state"
-function GetPromtValue(prompt_bufnr)
-	local buf = vim.api.nvim_buf_get_lines(prompt_bufnr,0,1,true)
-	local _, value = next(buf)
-
-	local picker = action_state.get_current_picker(prompt_bufnr)
-	local prompt_prefix = picker['prompt_prefix']
-	local value = string.gsub(value,prompt_prefix,'')
-	local stripped = string.gsub(value, "%s+", "")
-	return stripped
-end
-
-function ErrorMsg(msg)
-	vim.notify('Command: '..msg..' not found','ERROR')
-	actions.close(prompt_bufnr)
-end
 
 
 
@@ -76,7 +61,12 @@ function Command_pallete()
 		attach_mappings = function(prompt_bufnr, _)
 		actions.select_default:replace(function()
 			actions.close(prompt_bufnr)
-			local cmd =  action_state.get_current_line()
+			local buf =  action_state.get_current_line()
+			local selection = action_state.get_selected_entry()
+			local cmd = buf
+			if #buf < #selection.value then
+				cmd = selection.value
+			end
 			vim.cmd(cmd)
 		end)
 		_('i','<SPACE>',OnSpace(prompt_bufnr))
