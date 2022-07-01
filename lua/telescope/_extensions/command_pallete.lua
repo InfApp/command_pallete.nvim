@@ -4,25 +4,7 @@ local conf = require("telescope.config").values
 local drop_down_theme = require("telescope.themes").get_dropdown{}
 local actions = require "telescope.actions"
 local action_state = require "telescope.actions.state"
-local make_entry = require "telescope.make_entry"
-local cmd_pallete = require'command_pallete'
-
-function GetAllCommands()
-	local command_iter = vim.api.nvim_get_commands {}
-	local commands = {}
-
-	for _, cmd in pairs(command_iter) do
-		table.insert(commands, cmd)
-	end
-	local buf_command_iter = vim.api.nvim_buf_get_commands(0, {})
-	buf_command_iter[true] = nil -- remove the redundant entry
-	for _, cmd in pairs(buf_command_iter) do
-	table.insert(commands, cmd)
-	end
-	return commands
-end
-
-
+local state = require "telescope.state"
 function GetPromtValue(prompt_bufnr)
 	local buf = vim.api.nvim_buf_get_lines(prompt_bufnr,0,1,true)
 	local _, value = next(buf)
@@ -40,47 +22,52 @@ function ErrorMsg(msg)
 end
 
 
-function Command_pallete()
-	local finder = finders.new_table{
-		results = GetAllCommands(),
-		entry_maker = make_entry.gen_from_commands({}),
-	}
-	local opts = {
-		prompt_title = "Commands",
-		sorter = conf.generic_sorter({}),
-		finder = finder,
-		attach_mappings = function(prompt_bufnr, _)
-		actions.select_default:replace(function()
-			local selection = action_state.get_selected_entry()
-			local prompt_value =  GetPromtValue(prompt_bufnr)
-			if selection == nil then
-				ErrorMsg(prompt_value)
-				return
+
+function CreateBufferChangeHandler(cached_state)
+	return function(text)
+		local cmd = string.gsub(text, "%s+", " ")
+		local last_char = string.sub(cmd,-1)
+		if last_char ==' ' or #cmd == 1 then
+			if #cmd == 1 then
+				cmd = ''
 			end
-			actions.close(prompt_bufnr)
-			local val = selection.value
-       		local cmd = string.format([[:%s ]], val.name)
-			if val.nargs == "0" and prompt_value ~= '' then
-				vim.cmd(cmd)
-			  else
-				ParamPicker(cmd)
+			cached_state['items'] = vim.fn.getcompletion(cmd,'cmdline')
+			for key,value in ipairs(cached_state['items']) do
+				cached_state['items'][key] = {
+					value = cmd..value,
+					display = cmd..value,
+					ordinal= cmd..value
+				}
 			end
-		end)
-		return true
 		end
-	}
-	pickers.new(drop_down_theme,opts):find()
-end
-
-
-function ParamPicker(commands)
-	local results = vim.fn.getcompletion(commands,'cmdline')
-	if table.getn(results) == 0 then
-		vim.cmd(commands)
-		return
+		return cached_state['items']
 	end
-	local finder = finders.new_table{
-		results = results,
+end
+
+
+function OnSpace(prompt_bufnr)
+	return function()
+		local selection = action_state.get_selected_entry()
+		local picker =  action_state.get_current_picker(prompt_bufnr)
+		if(selection == nil) then
+			local text =  action_state.get_current_line()
+			picker:reset_prompt(text.." ")
+			return
+		end
+		picker:reset_prompt(selection.value.." ")
+	end
+end
+
+function Command_pallete()
+	local cached_state =  {
+		items = nil,
+		cached_command=nil
+	}
+	local finder = finders.new_dynamic{
+		entry_maker = function (entry)
+			return entry
+		end,
+		fn = CreateBufferChangeHandler(cached_state),
 	}
 	local opts = {
 		prompt_title = "Commands",
@@ -88,30 +75,16 @@ function ParamPicker(commands)
 		finder = finder,
 		attach_mappings = function(prompt_bufnr, _)
 		actions.select_default:replace(function()
-			local selection = action_state.get_selected_entry()
-			local prompt_value =  GetPromtValue(prompt_bufnr)
-			if selection == nil then
-				ErrorMsg(prompt_value)
-				return
-			end
 			actions.close(prompt_bufnr)
-			local val = selection.value
-       		local cmd = string.format([[:%s ]], val.name)
-			if val.nargs == "0" then
-				vim.cmd(commands..cmd)
-			elseif prompt_value == '' then
-				ParamPicker(commands..' '..cmd)
-			end
+			local cmd =  action_state.get_current_line()
+			vim.cmd(cmd)
 		end)
+		_('i','<SPACE>',OnSpace(prompt_bufnr))
 		return true
 		end
 	}
 	pickers.new(drop_down_theme,opts):find()
 end
-
-
-
-
 
 return require("telescope").register_extension({
     exports = {
